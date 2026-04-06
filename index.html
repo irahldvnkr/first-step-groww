@@ -652,13 +652,22 @@ body {
 .holdings { display: flex; flex-direction: column; gap: 8px; }
 .holding-row {
   display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  background: var(--cream);
+  overflow: hidden;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+.holding-row-top {
+  display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 10px;
-  border-radius: 9px;
-  background: var(--cream);
+  padding: 10px 12px;
 }
-.h-icon {
+.holding-row-top .h-icon {
   width: 30px; height: 30px;
   border-radius: 8px;
   display: flex;
@@ -667,12 +676,56 @@ body {
   font-size: 14px;
   flex-shrink: 0;
 }
-.h-name { font-size: 12px; font-weight: 500; }
-.h-sub { font-size: 11px; color: var(--muted); }
-.h-ret { font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 600; margin-left: auto; }
-.h-ret.up { color: var(--green-dark); }
-.h-ret.down { color: var(--red); }
-.h-ret.flat { color: var(--muted); }
+.holding-row-top .h-info { flex: 1; }
+.holding-row-top .h-name { font-size: 12px; font-weight: 500; }
+.holding-row-top .h-sub { font-size: 11px; color: var(--muted); }
+.holding-row-top .h-ret { font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 600; }
+.holding-row-top .h-ret.up { color: var(--green-dark); }
+.holding-row-top .h-ret.down { color: var(--red); }
+.holding-row-top .h-ret.flat { color: var(--muted); }
+.holding-row-top .h-tap-hint {
+  font-size: 10px;
+  color: var(--dim);
+  font-family: 'DM Mono', monospace;
+  flex-shrink: 0;
+}
+.asset-decision-row {
+  display: none;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+.asset-decision-row.open { display: grid; }
+.asset-dec-btn {
+  padding: 8px 4px;
+  border-radius: 9px;
+  border: 1.5px solid var(--border);
+  background: var(--white);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+  transition: all 0.15s ease;
+  outline: none;
+  -webkit-appearance: none;
+}
+.asset-dec-btn:focus { outline: none; }
+.asset-dec-btn.chosen-buy { background: var(--green-light); border-color: var(--green-mid); color: var(--green-deep); }
+.asset-dec-btn.chosen-hold { background: var(--ink); border-color: var(--ink); color: white; }
+.asset-dec-btn.chosen-stepout { background: var(--amber-light); border-color: var(--amber-border); color: #92400e; }
+.holding-row.has-decision { background: var(--green-light); }
+.holding-row.has-decision .h-tap-hint { display: none; }
+.holding-decided-badge {
+  display: none;
+  font-size: 10px;
+  font-family: 'DM Mono', monospace;
+  color: var(--green-dark);
+  flex-shrink: 0;
+}
+.holding-row.has-decision .holding-decided-badge { display: block; }
 
 .insight-card {
   background: var(--ink);
@@ -1310,24 +1363,9 @@ footer {
   </div>
 
   <div class="decision-section">
-    <div class="decision-label">Your decision for this snapshot</div>
-    <div class="decision-row">
-      <button class="dec-btn buy" onclick="decide('buy')">
-        Buy more
-        <span>Add to position</span>
-      </button>
-      <button class="dec-btn hold" onclick="decide('hold')">
-        Hold
-        <span>Stay as is</span>
-      </button>
-      <button class="dec-btn withdraw" onclick="decide('withdraw')">
-        Step out
-        <span>Exit for now</span>
-      </button>
-    </div>
-    <div class="hold-note" id="hold-note">
-      Most investors find doing nothing the hardest option. That instinct is worth noticing.
-    </div>
+    <div class="decision-label">Tap each asset to decide</div>
+    <div id="asset-decisions-hint" style="font-size:12px; color:var(--muted); margin-bottom:8px;">Tap an asset above to set your decision for it.</div>
+    <div class="hold-note" id="hold-note">Most investors find doing nothing the hardest option. That instinct is worth noticing.</div>
     <button class="next-snap-btn" id="next-snap-btn" onclick="advanceSnap()">Next snapshot →</button>
   </div>
 
@@ -1469,6 +1507,7 @@ const quiz = { goal: null, risk: null, horizon: null };
 let selectedAssets = [];
 let currentSnap = 0;
 let decisions = {};
+let assetDecisions = {}; // per-asset: assetDecisions[snapIndex][assetId] = 'buy'|'hold'|'stepout'
 let snapLabels = [];
 let simPeriod = null;
 
@@ -1914,6 +1953,7 @@ function goToSim() {
   simPeriod = getSimPeriod();
   snapLabels = simPeriod.snaps;
   decisions = {};
+  assetDecisions = {};
   currentSnap = 0;
 
   const goalLabel = {
@@ -1961,10 +2001,11 @@ function jumpSnap(i) {
     if (idx < currentSnap) b.classList.add('done');
     if (idx === currentSnap) b.classList.add('active');
   });
-  document.querySelectorAll('.dec-btn').forEach(b => b.classList.remove('chosen'));
-  if (decisions[currentSnap]) {
-    document.querySelector(`.dec-btn.${decisions[currentSnap]}`).classList.add('chosen');
-    if (decisions[currentSnap] === 'hold') document.getElementById('hold-note').classList.add('show');
+  const holdNote2 = document.getElementById('hold-note');
+  if (holdNote2) holdNote2.classList.remove('show');
+  if (assetDecisions[currentSnap]) {
+    const anyHold2 = Object.values(assetDecisions[currentSnap]).some(d => d === 'hold');
+    if (holdNote2) holdNote2.classList.toggle('show', anyHold2);
   }
 }
 
@@ -1981,14 +2022,26 @@ function updateSimScreen() {
     totalReturn += change;
     const cls = retPct > 0 ? 'up' : retPct < 0 ? 'down' : 'flat';
     const prefix = retPct > 0 ? '+' : '';
+    const assetDec = assetDecisions[currentSnap] ? assetDecisions[currentSnap][id] : null;
+    const hasDecision = !!assetDec;
+    const decLabel = { buy: 'Buy more', hold: 'Hold', stepout: 'Step out' };
     holdingsHTML += `
-      <div class="holding-row">
-        <div class="h-icon" style="background:${a.iconBg}">${a.icon}</div>
-        <div style="flex:1">
-          <div class="h-name">${a.name}</div>
-          <div class="h-sub">${pct}% allocation</div>
+      <div class="holding-row ${hasDecision ? 'has-decision' : ''}" id="hrow-${id}" onclick="toggleAssetDecision('${id}')">
+        <div class="holding-row-top">
+          <div class="h-icon" style="background:${a.iconBg}">${a.icon}</div>
+          <div class="h-info">
+            <div class="h-name">${a.name}</div>
+            <div class="h-sub">${pct}% allocation</div>
+          </div>
+          <div class="h-ret ${cls}">${prefix}${retPct.toFixed(1)}%</div>
+          <div class="holding-decided-badge">${assetDec ? decLabel[assetDec] : ''}</div>
+          <div class="h-tap-hint">tap →</div>
         </div>
-        <div class="h-ret ${cls}">${prefix}${retPct.toFixed(1)}%</div>
+        <div class="asset-decision-row" id="adrow-${id}">
+          <button class="asset-dec-btn ${assetDec === 'buy' ? 'chosen-buy' : ''}" onclick="setAssetDecision(event,'${id}','buy')">Buy more</button>
+          <button class="asset-dec-btn ${assetDec === 'hold' ? 'chosen-hold' : ''}" onclick="setAssetDecision(event,'${id}','hold')">Hold</button>
+          <button class="asset-dec-btn ${assetDec === 'stepout' ? 'chosen-stepout' : ''}" onclick="setAssetDecision(event,'${id}','stepout')">Step out</button>
+        </div>
       </div>`;
   });
 
@@ -2010,23 +2063,44 @@ function updateSimScreen() {
   document.getElementById('insight-text').textContent = simPeriod.insights[currentSnap];
 }
 
-function decide(choice) {
-  decisions[currentSnap] = choice;
-  document.querySelectorAll('.dec-btn').forEach(b => b.classList.remove('chosen'));
-  document.querySelector(`.dec-btn.${choice}`).classList.add('chosen');
+function toggleAssetDecision(id) {
+  const row = document.getElementById('adrow-' + id);
+  if (!row) return;
+  const isOpen = row.classList.contains('open');
+  // Close all open rows first
+  document.querySelectorAll('.asset-decision-row.open').forEach(r => r.classList.remove('open'));
+  if (!isOpen) row.classList.add('open');
+}
 
+function setAssetDecision(event, id, choice) {
+  event.stopPropagation();
+  if (!assetDecisions[currentSnap]) assetDecisions[currentSnap] = {};
+  assetDecisions[currentSnap][id] = choice;
+
+  // Close the inline selector
+  const row = document.getElementById('adrow-' + id);
+  if (row) row.classList.remove('open');
+
+  // Update the hold note logic — show if any asset chose hold
+  const anyHold = Object.values(assetDecisions[currentSnap]).some(d => d === 'hold');
   const holdNote = document.getElementById('hold-note');
-  holdNote.classList.toggle('show', choice === 'hold');
+  if (holdNote) holdNote.classList.toggle('show', anyHold);
 
-  const allDecided = Object.keys(decisions).length >= snapLabels.length;
-  document.getElementById('sim-next').disabled = !allDecided;
+  // Rerender holdings to update badges and button states
+  updateSimScreen();
 
-  // Show next button if not on last snap
+  // Check if all assets have a decision for this snapshot
+  const allAssetsDecided = selectedAssets.every(aid => assetDecisions[currentSnap] && assetDecisions[currentSnap][aid]);
+  const allSnapsDecided = snapLabels.every((_, i) =>
+    selectedAssets.every(aid => assetDecisions[i] && assetDecisions[i][aid])
+  );
+  document.getElementById('sim-next').disabled = !allSnapsDecided;
+
   const nextBtn = document.getElementById('next-snap-btn');
-  if (currentSnap < snapLabels.length - 1) {
-    nextBtn.textContent = `Next snapshot →`;
+  if (allAssetsDecided && currentSnap < snapLabels.length - 1) {
+    nextBtn.textContent = 'Next snapshot →';
     nextBtn.classList.add('show');
-  } else {
+  } else if (!allAssetsDecided) {
     nextBtn.classList.remove('show');
   }
 }
@@ -2039,14 +2113,15 @@ function advanceSnap() {
     if (i < currentSnap) b.classList.add('done');
     if (i === currentSnap) b.classList.add('active');
   });
-  document.querySelectorAll('.dec-btn').forEach(b => b.classList.remove('chosen'));
-  document.getElementById('hold-note').classList.remove('show');
   document.getElementById('next-snap-btn').classList.remove('show');
-  // Restore previous decision highlight if revisiting
-  if (decisions[currentSnap]) {
-    document.querySelector(`.dec-btn.${decisions[currentSnap]}`).classList.add('chosen');
-    if (decisions[currentSnap] === 'hold') document.getElementById('hold-note').classList.add('show');
-    if (currentSnap < snapLabels.length - 1) {
+  const holdNote = document.getElementById('hold-note');
+  if (holdNote) holdNote.classList.remove('show');
+  // Restore hold note if any asset chose hold at this snap
+  if (assetDecisions[currentSnap]) {
+    const anyHold = Object.values(assetDecisions[currentSnap]).some(d => d === 'hold');
+    if (holdNote) holdNote.classList.toggle('show', anyHold);
+    const allAssetsDecided = selectedAssets.every(aid => assetDecisions[currentSnap] && assetDecisions[currentSnap][aid]);
+    if (allAssetsDecided && currentSnap < snapLabels.length - 1) {
       document.getElementById('next-snap-btn').classList.add('show');
     }
   }
@@ -2069,24 +2144,35 @@ function goToReveal() {
     totalReturn += 10000 * (pct / 100) * (finalRet / 100);
   });
 
-  const stayCount = Object.values(decisions).filter(d => d === 'stay' || d === 'hold' || d === 'buy').length;
-  const withdrawCount = Object.values(decisions).filter(d => d === 'withdraw').length;
-  const holdCount = Object.values(decisions).filter(d => d === 'hold').length;
-  const buyCount = Object.values(decisions).filter(d => d === 'buy').length;
   const totalSnaps = snapLabels.length;
   const isUp = totalReturn >= 0;
   const isSingleAsset = selectedAssets.length === 1;
 
+  // Count decisions across all snaps and assets
+  let totalDecisions = 0, stepoutCount = 0, buyCount = 0, holdCount = 0;
+  snapLabels.forEach((_, si) => {
+    selectedAssets.forEach(aid => {
+      const d = assetDecisions[si] && assetDecisions[si][aid];
+      if (d) {
+        totalDecisions++;
+        if (d === 'stepout') stepoutCount++;
+        else if (d === 'buy') buyCount++;
+        else if (d === 'hold') holdCount++;
+      }
+    });
+  });
+  const stayedCount = totalDecisions - stepoutCount;
+
   // Behaviour headline
   let behaviourText = '';
-  if (withdrawCount === 0 && holdCount === totalSnaps) {
+  if (stepoutCount === 0 && holdCount === totalDecisions) {
     behaviourText = `You held through all ${totalSnaps} snapshots.`;
-  } else if (withdrawCount === 0 && buyCount > 0) {
+  } else if (stepoutCount === 0 && buyCount > 0) {
     behaviourText = `You kept investing through all ${totalSnaps} snapshots.`;
-  } else if (withdrawCount === totalSnaps) {
-    behaviourText = `You chose to step out at every snapshot.`;
-  } else if (withdrawCount > 0) {
-    behaviourText = `You stayed in for ${stayCount} snapshot${stayCount !== 1 ? 's' : ''} and stepped out at ${withdrawCount}.`;
+  } else if (stepoutCount === totalDecisions) {
+    behaviourText = `You chose to step out of every position at every snapshot.`;
+  } else if (stepoutCount > 0) {
+    behaviourText = `You stayed in for most decisions and stepped out of ${stepoutCount} position${stepoutCount !== 1 ? 's' : ''} across the simulation.`;
   } else {
     behaviourText = `You stayed invested through all ${totalSnaps} snapshots.`;
   }
@@ -2171,21 +2257,24 @@ function goToReveal() {
     reframeText.innerHTML = '';
   }
 
-  // Decisions recap
+  // Decisions recap — per asset per snapshot
   const recapEl = document.getElementById('recap-rows');
   const decisionLabels = {
-    stay: 'Stayed invested',
-    hold: 'Held position',
     buy: 'Bought more',
-    withdraw: 'Stepped out',
+    hold: 'Held',
+    stepout: 'Stepped out',
   };
   recapEl.innerHTML = snapLabels.map((label, i) => {
-    const d = decisions[i] || 'hold';
-    const cls = d === 'withdraw' ? 'withdraw' : d;
+    const assetRows = selectedAssets.map(aid => {
+      const d = assetDecisions[i] && assetDecisions[i][aid] || 'hold';
+      const cls = d === 'stepout' ? 'withdraw' : d;
+      const aName = ASSETS[aid] ? ASSETS[aid].name.split(' ')[0] : aid;
+      return `<span style="font-size:10px; color:var(--muted); margin-right:6px;">${aName}: <strong style="color:var(--ink)">${decisionLabels[d] || d}</strong></span>`;
+    }).join('');
     return `
-      <div class="recap-row">
+      <div class="recap-row" style="flex-direction:column; align-items:flex-start; gap:4px;">
         <div class="recap-snap">${label}</div>
-        <div class="recap-choice ${cls}">${decisionLabels[d] || d}</div>
+        <div style="display:flex; flex-wrap:wrap; gap:2px;">${assetRows}</div>
       </div>`;
   }).join('');
 
@@ -2212,6 +2301,7 @@ function restart() {
   quiz.goal = null; quiz.risk = null; quiz.horizon = null;
   selectedAssets = [];
   decisions = {};
+  assetDecisions = {};
   currentSnap = 0;
   simPeriod = null;
   snapLabels = [];
@@ -2225,7 +2315,8 @@ function restart() {
   document.getElementById('alloc-rows').innerHTML = '';
   document.getElementById('assets-next').disabled = true;
   document.getElementById('next-snap-btn').classList.remove('show');
-  document.getElementById('hold-note').classList.remove('show');
+  const holdNote = document.getElementById('hold-note');
+  if (holdNote) holdNote.classList.remove('show');
   goTo('s-intro');
 }
 </script>
